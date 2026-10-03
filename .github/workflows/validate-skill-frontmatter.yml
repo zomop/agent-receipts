@@ -1,0 +1,54 @@
+name: Validate skill frontmatter
+
+on:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate SKILL.md frontmatter
+        run: |
+          ruby <<'RUBY'
+          require "yaml"
+
+          errors = []
+          files = Dir["skills/*/SKILL.md"].sort
+
+          files.each do |path|
+            lines = File.readlines(path)
+            unless lines.first&.strip == "---"
+              errors << "#{path}: missing opening frontmatter delimiter"
+              next
+            end
+
+            closing_index = lines.drop(1).index { |line| line.strip == "---" }
+            unless closing_index
+              errors << "#{path}: missing closing frontmatter delimiter"
+              next
+            end
+
+            frontmatter = lines[1, closing_index].join
+            begin
+              data = YAML.safe_load(frontmatter, permitted_classes: [], aliases: false)
+            rescue Psych::Exception => error
+              errors << "#{path}: invalid YAML frontmatter (#{error.message.lines.first.strip})"
+              next
+            end
+
+            unless data.is_a?(Hash)
+              errors << "#{path}: frontmatter must be a mapping"
+              next
+            end
+
+            expected_name = File.basename(File.dirname(path))
+            errors << "#{path}: name must be #{expected_name.inspect}" unless data["name"] == expected_name
+            errors << "#{path}: description must be non-empty" unless data["description"].is_a?(String) && !data["description"].strip.empty?
+          end
+
+          abort errors.join("\n") unless errors.empty?
+          puts "Validated #{files.length} SKILL.md frontmatter file(s)."
+          RUBY
